@@ -1,20 +1,254 @@
-﻿// AESCiper.cpp : 此文件包含 "main" 函数。程序执行将在此处开始并结束。
-//
-
-#include <iostream>
+﻿/**
+* AES-128的实现,考虑实现难度明文仅支持使用ASCII输入
+* 说是实现 其实参考了很多外部代码，比如有限域上的计算 
+*/
+#include<iostream>
+#include<string>
+#include<vector>
 using namespace std;
-int main()
-{
-    cout << "AES Working In Progress\n";
+string m_text, k_text, mm_text;             //明文，密钥，解密后的明文
+vector<int> c_text;
+const int M_len = 16;                       //明文字符长度必须为16的倍数
+const int K_len = 16;                       //密钥字符长度必须为16 不满补空格
+int e_num=10;                               //具体的加密轮数
+long long int K_W[44];                      //密钥扩展数组，长度为44
+int m_matrix[4][4];                         //明文或者密文矩阵
+//常量轮值表
+const long long int Rcon[10] = { 0x01000000, 0x02000000, 0x04000000, 0x08000000, 0x10000000, 0x20000000, 0x40000000,
+                                   0x80000000, 0x1b000000, 0x36000000};
+
+//加密时的列混淆变换矩阵
+const int Col[4][4] = { 0x2, 0x3, 0x1, 0x1,
+                         0x1, 0x2, 0x3, 0x1,
+                         0x1, 0x1, 0x2, 0x3,
+                         0x3, 0x1, 0x1, 0x2 };
+
+//解密时的列混淆变换矩阵
+const int Col_1[4][4] = { 0xe, 0xb, 0xd, 0x9,
+                           0x9, 0xe, 0xb, 0xd,
+                           0xd, 0x9, 0xe, 0xb,
+                           0xb, 0xd, 0x9, 0xe };
+//S盒
+const int S[16][16] = { 0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+                        0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+                        0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+                        0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+                        0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+                        0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+                        0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+                        0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+                        0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+                        0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+                        0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+                        0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+                        0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+                        0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+                        0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+                        0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16 };
+
+//逆S盒
+const int S1[16][16] = { 0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38, 0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb,
+                        0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87, 0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb,
+                        0x54, 0x7b, 0x94, 0x32, 0xa6, 0xc2, 0x23, 0x3d, 0xee, 0x4c, 0x95, 0x0b, 0x42, 0xfa, 0xc3, 0x4e,
+                        0x08, 0x2e, 0xa1, 0x66, 0x28, 0xd9, 0x24, 0xb2, 0x76, 0x5b, 0xa2, 0x49, 0x6d, 0x8b, 0xd1, 0x25,
+                        0x72, 0xf8, 0xf6, 0x64, 0x86, 0x68, 0x98, 0x16, 0xd4, 0xa4, 0x5c, 0xcc, 0x5d, 0x65, 0xb6, 0x92,
+                        0x6c, 0x70, 0x48, 0x50, 0xfd, 0xed, 0xb9, 0xda, 0x5e, 0x15, 0x46, 0x57, 0xa7, 0x8d, 0x9d, 0x84,
+                        0x90, 0xd8, 0xab, 0x00, 0x8c, 0xbc, 0xd3, 0x0a, 0xf7, 0xe4, 0x58, 0x05, 0xb8, 0xb3, 0x45, 0x06,
+                        0xd0, 0x2c, 0x1e, 0x8f, 0xca, 0x3f, 0x0f, 0x02, 0xc1, 0xaf, 0xbd, 0x03, 0x01, 0x13, 0x8a, 0x6b,
+                        0x3a, 0x91, 0x11, 0x41, 0x4f, 0x67, 0xdc, 0xea, 0x97, 0xf2, 0xcf, 0xce, 0xf0, 0xb4, 0xe6, 0x73,
+                        0x96, 0xac, 0x74, 0x22, 0xe7, 0xad, 0x35, 0x85, 0xe2, 0xf9, 0x37, 0xe8, 0x1c, 0x75, 0xdf, 0x6e,
+                        0x47, 0xf1, 0x1a, 0x71, 0x1d, 0x29, 0xc5, 0x89, 0x6f, 0xb7, 0x62, 0x0e, 0xaa, 0x18, 0xbe, 0x1b,
+                        0xfc, 0x56, 0x3e, 0x4b, 0xc6, 0xd2, 0x79, 0x20, 0x9a, 0xdb, 0xc0, 0xfe, 0x78, 0xcd, 0x5a, 0xf4,
+                        0x1f, 0xdd, 0xa8, 0x33, 0x88, 0x07, 0xc7, 0x31, 0xb1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xec, 0x5f,
+                        0x60, 0x51, 0x7f, 0xa9, 0x19, 0xb5, 0x4a, 0x0d, 0x2d, 0xe5, 0x7a, 0x9f, 0x93, 0xc9, 0x9c, 0xef,
+                        0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0, 0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
+                        0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26, 0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d };
+void Input() {
+    cout << "请输入明文：" << endl;
+    getline(cin, m_text);
+    cout << endl;
+    cout << "请输入密钥：" << endl;
+    getline(cin, k_text);
+    cout << endl;
+    int m = m_text.length();
+    if (m % M_len)
+        for (int i = 0; i < M_len - m % M_len; i++)
+            m_text +=" ";
+    //修正密钥
+    int k = k_text.length();
+    while (k_text.size() % 16)
+    {
+        k_text += " ";
+    }
+    k_text = k_text.substr(0, 16);
 }
 
-// 运行程序: Ctrl + F5 或调试 >“开始执行(不调试)”菜单
-// 调试程序: F5 或调试 >“开始调试”菜单
+//第round轮的轮密钥
+long long int g(long long int num, int round) {
+    int a = num / pow(16, 6);
+    long long int num_1 = num * pow(16, 2);
+    num_1 = num_1 - a * pow(16, 8) + a;
+    //循环左移
+    long long num_2 = num_1;
+    int a_1 = num_1 / pow(16, 7), a_2 = num_1 / pow(16, 6) - a_1 * 16; num_1 = num_1 - pow(16, 7) * a_1 - pow(16, 6) * a_2;
+    int b_1 = num_1 / pow(16, 5), b_2 = num_1 / pow(16, 4) - b_1 * 16; num_1 = num_1 - pow(16, 5) * b_1 - pow(16, 4) * b_2;
+    int c_1 = num_1 / pow(16, 3), c_2 = num_1 / pow(16, 2) - c_1 * 16; num_1 = num_1 - pow(16, 3) * c_1 - pow(16, 2) * c_2;
+    int d_1 = num_1 / pow(16, 1), d_2 = num_1 / pow(16, 0) - d_1 * 16;
+    num_1 = S[a_1][a_2] * pow(16, 6) + S[b_1][b_2] * pow(16, 4) + S[c_1][c_2] * pow(16, 2) + S[d_1][d_2];
+    return num_1 ^ Rcon[round];
+}
 
-// 入门使用技巧: 
-//   1. 使用解决方案资源管理器窗口添加/管理文件
-//   2. 使用团队资源管理器窗口连接到源代码管理
-//   3. 使用输出窗口查看生成输出和其他消息
-//   4. 使用错误列表窗口查看错误
-//   5. 转到“项目”>“添加新项”以创建新的代码文件，或转到“项目”>“添加现有项”以将现有代码文件添加到项目
-//   6. 将来，若要再次打开此项目，请转到“文件”>“打开”>“项目”并选择 .sln 文件
+
+//密钥扩展
+void Extend_Key(string k_text) {     //传入密钥，根据密钥长度，确定需要扩展的密钥数组长度
+    int k_len = 4;
+    int K_W_len = 44;
+
+    for (int i = 0; i < k_len; i++)      //前k_len个种子密钥
+        K_W[i] = k_text[i * 4] * pow(16, 6) + k_text[i * 4 + 1] * pow(16, 4) + k_text[i * 4 + 2] * pow(16, 2) + k_text[i * 4 + 3];
+
+    for (int i = k_len; i < K_W_len; i++) {
+        if (i % k_len == 0) {
+            K_W[i] = K_W[i - k_len] ^ g(K_W[i - 1], i / k_len - 1);
+        }
+        else {
+            K_W[i] = K_W[i - k_len] ^ K_W[i - 1];
+        }
+    }
+}
+
+//字节替换
+int Byte_Change(int n, const int s[16][16]) {
+    return s[n / 16][n % 16];
+}
+
+//行位移
+void Row_Move(int m_matrix[][4], int d) {
+    for (int i = 1; i < 4; i++) {
+        int ii[4];
+        for (int j = 0; j < 4; j++)
+            ii[j] = m_matrix[i][(4 + j - d * i) % 4];
+        for (int j = 0; j < 4; j++)
+            m_matrix[i][j] = ii[j];
+    }
+}
+
+//有限域上的乘法 我也不想在写一遍了
+int G_Mul(int x, int y) {
+    int a[8];
+    a[0] = x;
+    for (int i = 1; i < 8; i++) {
+        a[i] = a[i - 1] << 1;
+        if (a[i] - 255 > 0)
+            a[i] = a[i] ^ 27;
+        a[i] = a[i] & 0xff;
+    }
+    int z = 0;
+    while (y != 0) {
+        int flag = y & (~y + 1);
+        for (int i = 0; i < 8; i++)
+            if ((flag >> i) == 1)
+                flag = i;
+        z = z ^ a[flag];
+        y = y - pow(2, flag);
+    }
+    return z;
+}
+//列混淆
+void Col_Confusion(int m_matrix[][4], const int Col[][4]) {     //明文矩阵， 变换矩阵
+    int a[4][4];
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            a[i][j] = G_Mul(m_matrix[0][j], Col[i][0]) ^ G_Mul(m_matrix[1][j], Col[i][1]) ^ G_Mul(m_matrix[2][j], Col[i][2]) ^ G_Mul(m_matrix[3][j], Col[i][3]);
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            m_matrix[i][j] = a[i][j];
+}
+
+//轮密钥加
+void XOR(int m_matrix[][4], long long int K_W[], int n) {     //第n轮
+    int k_w[4][4];
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++) {
+            k_w[i][j] = K_W[n * 4 + j] / pow(16, 6 - 2 * i);
+            K_W[n * 4 + j] -= k_w[i][j] * pow(16, 6 - 2 * i);
+        }
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            m_matrix[i][j] = (m_matrix[i][j] ^ k_w[i][j]) & 0xff;
+}
+
+//每个分组加密
+void DES_E(int m_matrix[][4], long long int K_W[]) {
+    XOR(m_matrix, K_W, 0);
+    for (int k = 1; k < e_num; k++) {
+        for (int i = 0; i < 4; i++)    
+            for (int j = 0; j < 4; j++)
+                m_matrix[i][j] = Byte_Change(m_matrix[i][j], S);
+        Row_Move(m_matrix, -1);     
+        Col_Confusion(m_matrix, Col);       
+        XOR(m_matrix, K_W, k);
+    }
+    for (int i = 0; i < 4; i++)  
+        for (int j = 0; j < 4; j++)
+            m_matrix[i][j] = Byte_Change(m_matrix[i][j], S);
+    Row_Move(m_matrix, -1);     
+    XOR(m_matrix, K_W, e_num);
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            c_text.push_back(m_matrix[i][j]);
+}
+//每个分组解密
+void DES_D(int m_matrix[][4], long long int K_W1[]) {
+    XOR(m_matrix, K_W1, e_num);
+    for (int k = e_num - 1; k > 0; k--) {
+        Row_Move(m_matrix, 1); 
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++)
+                m_matrix[i][j] = Byte_Change(m_matrix[i][j], S1);
+        XOR(m_matrix, K_W1, k);
+        Col_Confusion(m_matrix, Col_1); 
+    }
+    Row_Move(m_matrix, 1);
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            m_matrix[i][j] = Byte_Change(m_matrix[i][j], S1);
+    XOR(m_matrix, K_W1, 0);
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            mm_text += char(m_matrix[i][j]);
+}
+
+void Print() {
+    cout << "密钥为：" << endl;
+    cout << k_text << endl << endl;
+    cout << "本次加密对应的加密轮数为：" << endl;
+    cout << e_num << endl << endl;
+    cout << "加密的密文为：（16进制数）" << endl;
+    for (int i = 0; i < c_text.size(); i++)
+        printf("%x ", c_text[i]);
+    cout << endl << endl;
+    cout << "解密的明文为：" << endl;
+    cout << mm_text << endl << endl;
+}
+
+int main() {
+    Input();
+    //分组加密
+    for (int k = 0; k < m_text.length(); k += 16) {
+        Extend_Key(k_text);         //密钥扩展
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++)
+                m_matrix[i][j] = m_text[k + i * 4 + j];
+        DES_E(m_matrix, K_W);
+    }
+    //分组解密
+    for (int k = 0; k < c_text.size(); k += 16) {
+        Extend_Key(k_text);         //密钥扩展
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++)
+                m_matrix[i][j] = c_text[k + i * 4 + j];
+        DES_D(m_matrix, K_W);
+    }
+    Print();
+}
