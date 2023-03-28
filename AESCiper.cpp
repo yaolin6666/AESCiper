@@ -70,12 +70,10 @@ void Input() {
     cout << "请输入密钥：" << endl;
     getline(cin, k_text);
     cout << endl;
-    int m = m_text.length();
-    if (m % M_len)
-        for (int i = 0; i < M_len - m % M_len; i++)
-            m_text +=" ";
-    //修正密钥
-    int k = k_text.length();
+    //明文填充
+    while (m_text.length() % M_len)
+        m_text +=" ";
+    //密钥填充
     while (k_text.size() % 16)
     {
         k_text += " ";
@@ -220,8 +218,6 @@ void DES_D(int m_matrix[][4], long long int K_W1[]) {
 }
 
 void Print() {
-    cout << "密钥为：" << endl;
-    cout << k_text << endl << endl;
     cout << "本次加密对应的加密轮数为：" << endl;
     cout << e_num << endl << endl;
     cout << "加密的密文为：（16进制数）" << endl;
